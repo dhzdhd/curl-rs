@@ -1,5 +1,7 @@
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -12,17 +14,27 @@ use tui::{
     widgets::{Block, Borders, Paragraph, Tabs},
     Frame, Terminal,
 };
+use unicode_width::UnicodeWidthStr;
+
+enum InputMode {
+    Normal,
+    Editing,
+}
 
 struct App<'a> {
     pub titles: Vec<&'a str>,
+    pub inputs: Vec<String>,
     pub index: usize,
+    pub input_mode: InputMode,
 }
 
 impl<'a> App<'a> {
     fn new() -> App<'a> {
         App {
-            titles: vec!["Tab0", "Tab1", "Tab2", "Tab3"],
+            titles: vec!["Headers", "Body"],
+            inputs: vec!["".to_string(), "".to_string()],
             index: 0,
+            input_mode: InputMode::Normal,
         }
     }
 
@@ -72,12 +84,28 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
 
         if let Event::Key(key) = event::read()? {
             if key.kind == KeyEventKind::Press {
-                match key.code {
-                    KeyCode::Char('q') => return Ok(()),
-                    KeyCode::Right => app.next(),
-                    KeyCode::Left => app.previous(),
-                    KeyCode::Down => (),
-                    KeyCode::Up => (),
+                match key.modifiers {
+                    KeyModifiers::NONE => match app.input_mode {
+                        InputMode::Normal => match key.code {
+                            KeyCode::Right => app.next(),
+                            KeyCode::Left => app.previous(),
+                            KeyCode::Down => app.input_mode = InputMode::Editing,
+                            _ => {}
+                        },
+                        InputMode::Editing => match key.code {
+                            KeyCode::Esc => app.input_mode = InputMode::Normal,
+                            KeyCode::Char(c) => app.inputs[app.index].push(c),
+                            KeyCode::Backspace => {
+                                app.inputs[app.index].pop();
+                            }
+                            KeyCode::Enter => app.inputs[app.index].push('\n'),
+                            _ => {}
+                        },
+                    },
+                    KeyModifiers::ALT => match key.code {
+                        KeyCode::Char('q') => return Ok(()),
+                        _ => {}
+                    },
                     _ => {}
                 }
             }
@@ -120,23 +148,29 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &App) {
     f.render_widget(tabs, layout[0]);
 
     let inner = match app.index {
-        0 => Paragraph::new("")
+        0 => Paragraph::new(app.inputs[0].clone())
             .style(Style::default().bg(Color::Black).fg(Color::White))
-            .block(Block::default().title("0"))
+            .block(Block::default().borders(Borders::ALL))
             .alignment(Alignment::Left),
-        1 => Paragraph::new("")
+        1 => Paragraph::new(app.inputs[1].clone())
             .style(Style::default().bg(Color::Black).fg(Color::White))
-            .block(Block::default().title("1"))
-            .alignment(Alignment::Left),
-        2 => Paragraph::new("")
-            .style(Style::default().bg(Color::Black).fg(Color::White))
-            .block(Block::default().title("2"))
-            .alignment(Alignment::Left),
-        3 => Paragraph::new("")
-            .style(Style::default().bg(Color::Black).fg(Color::White))
-            .block(Block::default().title("3"))
+            .block(Block::default().borders(Borders::ALL))
             .alignment(Alignment::Left),
         _ => unreachable!(),
     };
     f.render_widget(inner, layout[1]);
+
+    match app.input_mode {
+        InputMode::Normal =>
+            // Hide the cursor. `Frame` does this by default, so we don't need to do anything here
+            {}
+
+        InputMode::Editing => {
+            // Make the cursor visible and ask tui-rs to put it at the specified coordinates after rendering
+            f.set_cursor(
+                layout[1].x + app.inputs[app.index].lines().last().unwrap_or("").width() as u16 + 1,
+                layout[1].y + app.inputs[app.index].lines().collect::<Vec<&str>>().len() as u16,
+            )
+        }
+    }
 }
