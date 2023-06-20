@@ -95,6 +95,7 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &App) {
 
     let block = Block::default().style(Style::default().bg(Color::Black).fg(Color::White));
     f.render_widget(block, size);
+
     let titles = app
         .titles
         .iter()
@@ -116,8 +117,8 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &App) {
                 .add_modifier(Modifier::BOLD)
                 .bg(Color::Blue),
         );
-
     f.render_widget(tabs, layout[0]);
+
     let inner = match app.index {
         0 => Paragraph::new("")
             .style(Style::default().bg(Color::Black).fg(Color::White))
