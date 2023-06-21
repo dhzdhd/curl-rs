@@ -1,6 +1,7 @@
 use crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+        KeyModifiers,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -14,7 +15,7 @@ use tui::{
     widgets::{Block, Borders, Paragraph, Tabs},
     Frame, Terminal,
 };
-use tui_textarea::TextArea;
+use tui_textarea::{Input, Key, TextArea};
 use unicode_width::UnicodeWidthStr;
 
 #[derive(Clone, Copy, Debug)]
@@ -107,10 +108,29 @@ impl<'a> App<'a> {
 
     fn run(&mut self) -> io::Result<()> {
         loop {
-            self.terminal.draw(|f| Self::ui(f, &self.state))?;
+            // Try to make ui() a struct method and not an assoc method
+            self.terminal.draw(|f| {
+                Self::ui(
+                    f,
+                    &self.state,
+                    &mut self.uri_editor,
+                    &mut self.payload_editors,
+                )
+            })?;
 
-            if let Event::Key(key) = event::read()? {
+            let event = event::read()?;
+            if let Event::Key(key) = event.into() {
                 if key.kind == KeyEventKind::Press {
+                    match self.state.input_mode {
+                        InputMode::PayloadEditing => {
+                            self.payload_editors[self.state.tab_index].input(key);
+                        }
+                        InputMode::UriEditing => {
+                            self.uri_editor.input(key);
+                        }
+                        _ => {}
+                    }
+
                     match key.modifiers {
                         KeyModifiers::NONE => match self.state.input_mode {
                             InputMode::Normal => match key.code {
@@ -162,7 +182,12 @@ impl<'a> App<'a> {
         }
     }
 
-    fn ui(f: &mut Frame<CrosstermBackend<io::Stdout>>, state: &State) {
+    fn ui(
+        f: &mut Frame<CrosstermBackend<io::Stdout>>,
+        state: &State,
+        uri_editor: &mut TextArea<'a>,
+        payload_editors: &mut Vec<TextArea<'a>>,
+    ) {
         let size = f.size();
 
         let main_layout = Layout::default()
@@ -175,7 +200,7 @@ impl<'a> App<'a> {
             .direction(Direction::Vertical)
             .constraints(
                 [
-                    Constraint::Length(4),
+                    Constraint::Length(3),
                     Constraint::Length(3),
                     Constraint::Min(0),
                 ]
@@ -191,14 +216,10 @@ impl<'a> App<'a> {
         let block = Block::default().style(Style::default().bg(Color::Black).fg(Color::White));
         f.render_widget(block, size);
 
-        // let uri = Paragraph::new(app.uri_input.clone())
-        //     .style(Style::default().bg(Color::Black).fg(Color::White))
-        //     .block(Block::default().borders(Borders::ALL).title("uri"))
-        //     .alignment(Alignment::Left);
-        let mut uri = TextArea::default();
-        uri.set_block(Block::default().borders(Borders::ALL).title("Search"));
+        uri_editor.set_block(Block::default().borders(Borders::ALL).title("uri"));
+        uri_editor.set_style(Style::default().bg(Color::Black).fg(Color::White));
 
-        f.render_widget(uri.widget(), req_layout[0]);
+        f.render_widget(uri_editor.widget(), req_layout[0]);
 
         let titles = state
             .titles
@@ -225,42 +246,11 @@ impl<'a> App<'a> {
         f.render_widget(tabs, req_layout[1]);
 
         let inner = match state.tab_index {
-            0 => Paragraph::new(state.payload_inputs[0].clone())
-                .style(Style::default().bg(Color::Black).fg(Color::White))
-                .block(Block::default().borders(Borders::ALL).title("payload"))
-                .alignment(Alignment::Left),
-            1 => Paragraph::new(state.payload_inputs[1].clone())
-                .style(Style::default().bg(Color::Black).fg(Color::White))
-                .block(Block::default().borders(Borders::ALL).title("payload"))
-                .alignment(Alignment::Left),
+            0 => &payload_editors[0],
+            1 => &payload_editors[1],
             _ => unreachable!(),
         };
-        f.render_widget(inner, req_layout[2]);
-
-        match state.input_mode {
-            InputMode::Normal =>
-                // Hide the cursor. `Frame` does this by default, so we don't need to do anything here
-                {}
-
-            InputMode::UriEditing => {}
-            InputMode::PayloadEditing => {
-                // Make the cursor visible and ask tui-rs to put it at the specified coordinates after rendering
-                f.set_cursor(
-                    req_layout[2].x
-                        + state.payload_inputs[state.tab_index]
-                            .lines()
-                            .last()
-                            .unwrap_or("")
-                            .width() as u16
-                        + 1,
-                    req_layout[2].y
-                        + state.payload_inputs[state.tab_index]
-                            .lines()
-                            .collect::<Vec<&str>>()
-                            .len() as u16,
-                )
-            }
-        }
+        f.render_widget(inner.widget(), req_layout[2]);
     }
 }
 
