@@ -5,18 +5,20 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use regex::Regex;
+
 use std::io;
 use tui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
-    text::{Span, Spans},
+    text::{self, Span, Spans, Text},
     widgets::{Block, Borders, Tabs},
     Frame, Terminal,
 };
 use tui_textarea::TextArea;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InputMode {
     UriEditing = 0,
     Normal = 1,
@@ -81,9 +83,40 @@ impl<'a> State<'a> {
     }
 }
 
+struct Editor<'a> {
+    title: &'a str,
+    text_area: TextArea<'a>,
+}
+
+impl<'a> Editor<'a> {
+    fn default(title: &'a str) -> Self {
+        let mut text_area = TextArea::default();
+        text_area.set_style(Style::default().bg(Color::Black).fg(Color::White));
+
+        Self { title, text_area }
+    }
+
+    fn text(&self) -> String {
+        self.text_area.lines().join("\n")
+    }
+
+    fn validate_uri(&self) -> bool {
+        let url_pattern = r#"^(https?|ftp):\/\/[^\s/$.?#].[^\s]*$"#;
+        let re = Regex::new(url_pattern).unwrap();
+
+        !self.text().trim().is_empty() && re.is_match(self.text().as_str())
+    }
+
+    fn validate_json(&self) -> bool {
+        let json_pattern = r#"^(\{(?:\s*"(?:[^"\\]|\\["\\/bfnrt]|\\u[0-9a-fA-F]{4})*"\s*:\s*(?:(?1)|null|true|false|\d+(?:\.\d*)?|\.\d+|"(?:[^"\\]|\\["\\/bfnrt]|\\u[0-9a-fA-F]{4})*"|(?2)|\[(?:(?1)(?:,\s*(?1))*)?\]))*(?:,\s*)?\})$"#;
+        let re = Regex::new(json_pattern).unwrap();
+        re.is_match(self.text().as_str())
+    }
+}
+
 struct App<'a> {
-    uri_editor: TextArea<'a>,
-    payload_editors: Vec<TextArea<'a>>,
+    uri_editor: Editor<'a>,
+    payload_editors: Vec<Editor<'a>>,
     state: State<'a>,
     terminal: Terminal<CrosstermBackend<io::Stdout>>,
 }
@@ -97,11 +130,8 @@ impl<'a> App<'a> {
         let terminal = Terminal::new(backend)?;
 
         Ok(Self {
-            uri_editor: TextArea::new(vec!["".to_string()]),
-            payload_editors: vec![
-                TextArea::new(vec!["".to_string()]),
-                TextArea::new(vec!["".to_string()]),
-            ],
+            uri_editor: Editor::default("uri"),
+            payload_editors: vec![Editor::default("headers"), Editor::default("body")],
             state: State::new(),
             terminal,
         })
@@ -124,10 +154,12 @@ impl<'a> App<'a> {
                 if key.kind == KeyEventKind::Press {
                     match self.state.input_mode {
                         InputMode::PayloadEditing => {
-                            self.payload_editors[self.state.req_tab_index].input(key);
+                            self.payload_editors[self.state.req_tab_index]
+                                .text_area
+                                .input(key);
                         }
                         InputMode::UriEditing => {
-                            self.uri_editor.input(key);
+                            self.uri_editor.text_area.input(key);
                         }
                         _ => {}
                     }
@@ -161,11 +193,12 @@ impl<'a> App<'a> {
     fn ui(
         f: &mut Frame<CrosstermBackend<io::Stdout>>,
         state: &State,
-        uri_editor: &mut TextArea<'a>,
-        payload_editors: &mut Vec<TextArea<'a>>,
+        uri_editor: &mut Editor<'a>,
+        payload_editors: &mut Vec<Editor<'a>>,
     ) {
         let size = f.size();
 
+        // Layouts
         let main_layout = Layout::default()
             .direction(Direction::Horizontal)
             .margin(1)
@@ -192,11 +225,20 @@ impl<'a> App<'a> {
         let block = Block::default().style(Style::default().bg(Color::Black).fg(Color::White));
         f.render_widget(block, size);
 
-        uri_editor.set_block(Block::default().borders(Borders::ALL).title("uri"));
-        uri_editor.set_style(Style::default().bg(Color::Black).fg(Color::White));
+        uri_editor.text_area.set_block(
+            Block::default()
+                .borders(Borders::all())
+                .border_style(
+                    Style::default().fg(if state.input_mode == InputMode::UriEditing {
+                        Color::Cyan
+                    } else {
+                        Color::White
+                    }),
+                )
+                .title(uri_editor.title),
+        );
 
-        f.render_widget(uri_editor.widget(), req_layout[0]);
-
+        // Payload tabs
         let payload_titles = state
             .payload_titles
             .iter()
@@ -212,21 +254,37 @@ impl<'a> App<'a> {
         let tabs = Tabs::new(payload_titles)
             .block(Block::default().borders(Borders::ALL).title("option"))
             .select(state.req_tab_index)
-            .style(Style::default().fg(Color::Cyan))
+            .style(
+                Style::default().fg(if state.input_mode == InputMode::Normal {
+                    Color::Cyan
+                } else {
+                    Color::White
+                }),
+            )
             .highlight_style(
                 Style::default()
                     .add_modifier(Modifier::BOLD)
                     .bg(Color::Blue),
             );
 
-        f.render_widget(tabs, req_layout[1]);
+        // Payload editor
+        let inner = &mut payload_editors[state.req_tab_index];
+        inner.text_area.set_block(
+            Block::default()
+                .borders(Borders::all())
+                .border_style(Style::default().fg(
+                    if state.input_mode == InputMode::PayloadEditing {
+                        Color::Cyan
+                    } else {
+                        Color::White
+                    },
+                ))
+                .title(inner.title),
+        );
 
-        let inner = match state.req_tab_index {
-            0 => &payload_editors[0],
-            1 => &payload_editors[1],
-            _ => unreachable!(),
-        };
-        f.render_widget(inner.widget(), req_layout[2]);
+        f.render_widget(uri_editor.text_area.widget(), req_layout[0]);
+        f.render_widget(tabs, req_layout[1]);
+        f.render_widget(inner.text_area.widget(), req_layout[2]);
     }
 }
 
