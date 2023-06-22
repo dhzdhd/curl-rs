@@ -107,6 +107,7 @@ dependencies = [
  "crossterm",
  "regex",
  "reqwest",
+ "serde_json",
  "tui",
  "tui-textarea",
  "unicode-width",

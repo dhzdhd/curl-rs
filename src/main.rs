@@ -6,6 +6,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use regex::Regex;
+use serde_json::Value;
 
 use std::io;
 use tui::{
@@ -108,9 +109,9 @@ impl<'a> Editor<'a> {
     }
 
     fn validate_json(&self) -> bool {
-        let json_pattern = r#"^(\{(?:\s*"(?:[^"\\]|\\["\\/bfnrt]|\\u[0-9a-fA-F]{4})*"\s*:\s*(?:(?1)|null|true|false|\d+(?:\.\d*)?|\.\d+|"(?:[^"\\]|\\["\\/bfnrt]|\\u[0-9a-fA-F]{4})*"|(?2)|\[(?:(?1)(?:,\s*(?1))*)?\]))*(?:,\s*)?\})$"#;
-        let re = Regex::new(json_pattern).unwrap();
-        re.is_match(self.text().as_str())
+        let parsed_json: Result<Value, serde_json::Error> =
+            serde_json::from_str(self.text().as_str());
+        parsed_json.is_ok()
     }
 }
 
@@ -274,7 +275,11 @@ impl<'a> App<'a> {
                 .borders(Borders::all())
                 .border_style(Style::default().fg(
                     if state.input_mode == InputMode::PayloadEditing {
-                        Color::Cyan
+                        if inner.validate_json() {
+                            Color::Cyan
+                        } else {
+                            Color::Red
+                        }
                     } else {
                         Color::White
                     },
