@@ -5,115 +5,24 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use models::{Editor, InputMode, State};
 use regex::Regex;
 use serde_json::Value;
 
+mod models;
+mod traits;
+
 use std::io;
+use traits::Tab;
 use tui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
-    text::{self, Span, Spans, Text},
+    text::{Span, Spans},
     widgets::{Block, Borders, Tabs},
     Frame, Terminal,
 };
 use tui_textarea::TextArea;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum InputMode {
-    UriEditing = 0,
-    Normal = 1,
-    PayloadEditing = 2,
-}
-
-impl InputMode {
-    fn as_int(&self) -> u8 {
-        *self as u8
-    }
-
-    fn to_enum(&self, num: u8) -> Self {
-        match num {
-            0 => Self::UriEditing,
-            1 => Self::Normal,
-            2 => Self::PayloadEditing,
-            _ => Self::Normal,
-        }
-    }
-
-    fn next(&self) -> Self {
-        self.to_enum((self.as_int() + 1) % 3)
-    }
-
-    fn previous(&self) -> Self {
-        self.to_enum((self.as_int() + 2) % 3)
-    }
-}
-
-struct Response {
-    json: String,
-    status: u32,
-}
-
-struct State<'a> {
-    pub payload_titles: Vec<&'a str>,
-    pub req_tab_index: usize,
-    pub main_index: usize,
-    pub input_mode: InputMode,
-}
-
-impl<'a> State<'a> {
-    fn new() -> Self {
-        Self {
-            payload_titles: vec!["Headers", "Body"],
-            req_tab_index: 0,
-            main_index: 0,
-            input_mode: InputMode::UriEditing,
-        }
-    }
-
-    pub fn next_payload(&mut self) {
-        self.req_tab_index = (self.req_tab_index + 1) % self.payload_titles.len();
-    }
-
-    pub fn previous_payload(&mut self) {
-        if self.req_tab_index > 0 {
-            self.req_tab_index -= 1;
-        } else {
-            self.req_tab_index = self.payload_titles.len() - 1;
-        }
-    }
-}
-
-struct Editor<'a> {
-    title: &'a str,
-    text_area: TextArea<'a>,
-}
-
-impl<'a> Editor<'a> {
-    fn default(title: &'a str) -> Self {
-        let mut text_area = TextArea::default();
-        text_area.set_style(Style::default().bg(Color::Black).fg(Color::White));
-
-        Self { title, text_area }
-    }
-
-    fn text(&self) -> String {
-        self.text_area.lines().join("\n")
-    }
-
-    fn validate_uri(&self) -> bool {
-        let url_pattern = r#"^(https?|ftp):\/\/[^\s/$.?#].[^\s]*$"#;
-        let re = Regex::new(url_pattern).unwrap();
-
-        !self.text().trim().is_empty() && re.is_match(self.text().as_str())
-    }
-
-    fn validate_json(&self) -> bool {
-        let parsed_json: Result<Value, serde_json::Error> =
-            serde_json::from_str(self.text().as_str());
-        parsed_json.is_ok()
-    }
-}
 
 struct App<'a> {
     uri_editor: Editor<'a>,
@@ -223,8 +132,15 @@ impl<'a> App<'a> {
             .constraints([Constraint::Min(0), Constraint::Length(3)])
             .split(main_layout[1]);
 
+        // Main block
         let block = Block::default().style(Style::default().bg(Color::Black).fg(Color::White));
         f.render_widget(block, size);
+
+        // Response block
+        let resp_block = Block::default()
+            .borders(Borders::all())
+            .style(Style::default().fg(Color::White));
+        f.render_widget(resp_block, main_layout[1]);
 
         uri_editor.text_area.set_block(
             Block::default()
