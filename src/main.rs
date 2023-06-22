@@ -1,7 +1,6 @@
 use crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
-        KeyModifiers,
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -9,14 +8,13 @@ use crossterm::{
 use std::io;
 use tui::{
     backend::CrosstermBackend,
-    layout::{Alignment, Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Span, Spans},
-    widgets::{Block, Borders, Paragraph, Tabs},
+    widgets::{Block, Borders, Tabs},
     Frame, Terminal,
 };
-use tui_textarea::{Input, Key, TextArea};
-use unicode_width::UnicodeWidthStr;
+use tui_textarea::TextArea;
 
 #[derive(Clone, Copy, Debug)]
 enum InputMode {
@@ -48,34 +46,37 @@ impl InputMode {
     }
 }
 
+struct Response {
+    json: String,
+    status: u32,
+}
+
 struct State<'a> {
-    pub titles: Vec<&'a str>,
-    pub payload_inputs: Vec<String>,
-    pub uri_input: String,
-    pub tab_index: usize,
+    pub payload_titles: Vec<&'a str>,
+    pub req_tab_index: usize,
+    pub main_index: usize,
     pub input_mode: InputMode,
 }
 
 impl<'a> State<'a> {
     fn new() -> Self {
         Self {
-            titles: vec!["Headers", "Body"],
-            payload_inputs: vec!["".to_string(), "".to_string()],
-            uri_input: "".to_string(),
-            tab_index: 0,
+            payload_titles: vec!["Headers", "Body"],
+            req_tab_index: 0,
+            main_index: 0,
             input_mode: InputMode::UriEditing,
         }
     }
 
     pub fn next_payload(&mut self) {
-        self.tab_index = (self.tab_index + 1) % self.titles.len();
+        self.req_tab_index = (self.req_tab_index + 1) % self.payload_titles.len();
     }
 
     pub fn previous_payload(&mut self) {
-        if self.tab_index > 0 {
-            self.tab_index -= 1;
+        if self.req_tab_index > 0 {
+            self.req_tab_index -= 1;
         } else {
-            self.tab_index = self.titles.len() - 1;
+            self.req_tab_index = self.payload_titles.len() - 1;
         }
     }
 }
@@ -123,7 +124,7 @@ impl<'a> App<'a> {
                 if key.kind == KeyEventKind::Press {
                     match self.state.input_mode {
                         InputMode::PayloadEditing => {
-                            self.payload_editors[self.state.tab_index].input(key);
+                            self.payload_editors[self.state.req_tab_index].input(key);
                         }
                         InputMode::UriEditing => {
                             self.uri_editor.input(key);
@@ -138,25 +139,7 @@ impl<'a> App<'a> {
                                 KeyCode::Left => self.state.previous_payload(),
                                 _ => {}
                             },
-                            InputMode::PayloadEditing => match key.code {
-                                KeyCode::Char(c) => {
-                                    self.state.payload_inputs[self.state.tab_index].push(c)
-                                }
-                                KeyCode::Backspace => {
-                                    self.state.payload_inputs[self.state.tab_index].pop();
-                                }
-                                KeyCode::Enter => {
-                                    self.state.payload_inputs[self.state.tab_index].push('\n')
-                                }
-                                _ => {}
-                            },
-                            InputMode::UriEditing => match key.code {
-                                KeyCode::Char(c) => self.state.uri_input.push(c),
-                                KeyCode::Backspace => {
-                                    self.state.uri_input.pop();
-                                }
-                                _ => {}
-                            },
+                            _ => {}
                         },
                         KeyModifiers::ALT => match key.code {
                             KeyCode::Char('q') => return Ok(()),
@@ -165,13 +148,6 @@ impl<'a> App<'a> {
                         KeyModifiers::SHIFT => match key.code {
                             KeyCode::Down => self.state.input_mode = self.state.input_mode.next(),
                             KeyCode::Up => self.state.input_mode = self.state.input_mode.previous(),
-                            KeyCode::Char(c) => match self.state.input_mode {
-                                InputMode::UriEditing => self.state.uri_input.push(c),
-                                InputMode::PayloadEditing => {
-                                    self.state.payload_inputs[self.state.tab_index].push(c)
-                                }
-                                _ => {}
-                            },
                             KeyCode::Enter => {}
                             _ => {}
                         },
@@ -221,8 +197,8 @@ impl<'a> App<'a> {
 
         f.render_widget(uri_editor.widget(), req_layout[0]);
 
-        let titles = state
-            .titles
+        let payload_titles = state
+            .payload_titles
             .iter()
             .map(|t| {
                 let (first, rest) = t.split_at(1);
@@ -233,9 +209,9 @@ impl<'a> App<'a> {
             })
             .collect();
 
-        let tabs = Tabs::new(titles)
+        let tabs = Tabs::new(payload_titles)
             .block(Block::default().borders(Borders::ALL).title("option"))
-            .select(state.tab_index)
+            .select(state.req_tab_index)
             .style(Style::default().fg(Color::Cyan))
             .highlight_style(
                 Style::default()
@@ -245,7 +221,7 @@ impl<'a> App<'a> {
 
         f.render_widget(tabs, req_layout[1]);
 
-        let inner = match state.tab_index {
+        let inner = match state.req_tab_index {
             0 => &payload_editors[0],
             1 => &payload_editors[1],
             _ => unreachable!(),
