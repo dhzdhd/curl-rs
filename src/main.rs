@@ -6,8 +6,6 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use models::{Editor, InputMode, State};
-use regex::Regex;
-use serde_json::Value;
 
 mod models;
 mod traits;
@@ -22,7 +20,6 @@ use tui::{
     widgets::{Block, Borders, Tabs},
     Frame, Terminal,
 };
-use tui_textarea::TextArea;
 
 struct App<'a> {
     uri_editor: Editor<'a>,

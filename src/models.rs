@@ -128,3 +128,14 @@ impl<'a> Editor<'a> {
         parsed_json.is_ok()
     }
 }
+
+pub struct Request {
+    pub headers: Option<String>,
+    pub body: Option<String>,
+    pub uri: String,
+    pub method: String,
+}
+
+impl Request {
+    pub async fn fetch() {}
+}
